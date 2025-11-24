@@ -1,0 +1,63 @@
+# --- SCRIPT CONSOLIDADO FINAL PARA REPOSITÓRIO ---
+
+# 1. CARREGAR PACOTES E DADOS
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(scales)
+library(stringr)
+
+# 2. DEFINIR CAMINHO
+# O arquivo deve ser submetido ao GitHub junto com o script.
+# Usamos o caminho relativo (apenas o nome do arquivo) pois ele estará na mesma pasta do script.
+file_path <- "Planilha_APENAS_Cirurgia_Geral.xlsx" 
+
+dados_brutos <- read_excel(file_path)
+
+# 3. PRÉ-PROCESSAMENTO E CRIAÇÃO DE VARIÁVEIS LIMPAS
+dados_processados <- dados_brutos %>%
+  mutate(
+    # Idade (Conversão)
+    anos = as.numeric(str_match(IDADE, "(\\d+)\\s*Anos")[, 2]),
+    meses = as.numeric(str_match(IDADE, "(\\d+)\\s*Meses")[, 2]),
+    IDADE_NUMERICA = replace_na(anos, 0) + (replace_na(meses, 0) / 12),
+    
+    # Tempos
+    DATA_BASE = as.Date(dmy_hms(DT_REALIZACAO)),
+    INICIO_SALA = DATA_BASE + hm(HORA_I_SALA),
+    FIM_SALA = DATA_BASE + hm(HORA_F_SALA),
+    
+    # Correção Overnight e Cálculo Final do Tempo de Sala
+    FIM_SALA = if_else(FIM_SALA < INICIO_SALA, FIM_SALA + days(1), FIM_SALA, missing = FIM_SALA),
+    TEMPO_SALA_MINUTOS = as.numeric(difftime(FIM_SALA, INICIO_SALA, units = "mins")),
+    
+    # Período do dia para o Heatmap
+    HORA_INICIO = hour(INICIO_SALA),
+    PERIODO = case_when(
+      HORA_INICIO >= 6 & HORA_INICIO < 12 ~ "Manhã",
+      HORA_INICIO >= 12 & HORA_INICIO < 18 ~ "Tarde",
+      TRUE ~ "Noite/Madrugada"
+    )
+  )
+
+# 4. TESTE INFERENCIAL 1: Kruskal-Wallis (Tempo vs Porte)
+# A função Kruskal-Wallis é usada para obter o p-valor que citamos nos Resultados.
+teste_kw <- kruskal.test(TEMPO_SALA_MINUTOS ~ PORTE, data = dados_processados)
+p_valor_kw <- format.pval(teste_kw$p.value, digits = 3)
+
+# 5. TESTE INFERENCIAL 2: Qui-Quadrado (Associação Tipo vs Porte)
+tabela_cruzada <- table(dados_processados$PORTE, dados_processados$TIPO_CIRURGIA)
+teste_qui <- chisq.test(tabela_cruzada)
+p_valor_qui <- format.pval(teste_qui$p.value, digits = 3)
+
+# 6. GERAÇÃO DOS GRÁFICOS CHAVE (Exemplo de Boxplot)
+# Este bloco seria usado para gerar o gráfico Boxplot (Teste 2) com o p-valor
+grafico_boxplot <- dados_processados %>%
+  filter(!is.na(PORTE) & !is.na(TEMPO_SALA_MINUTOS) & TEMPO_SALA_MINUTOS > 0) %>%
+  ggplot(aes(x = PORTE, y = TEMPO_SALA_MINUTOS, fill = PORTE)) +
+  geom_boxplot(outlier.colour = "red", outlier.alpha = 0.5) +
+  labs(
+    subtitle = paste("Kruskal-Wallis p-valor", ifelse(teste_kw$p.value < 0.001, "< 0.001", paste("=", p_valor_kw))),
+    y = "Tempo (min)"
+  )
+# ggsave("Teste2_Comparacao_Porte.png", plot = grafico_boxplot, width = 8, height = 6)
