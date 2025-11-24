@@ -1,6 +1,6 @@
 # 🔬 Estudo Retrospectivo sobre os Diagnósticos Mais Frequentes no Departamento de Cirurgia Geral do Pronto Atendimento do Hospital Unimed-BH Contorno
 
-Nome do Aluno: Arthur de Moraes Chaves; Júlia Dias | Orientador: Rodrigo Melo
+Nome dos Alunos: Arthur de Moraes Chaves; Júlia Dias | Orientador: Rodrigo Melo
 ---
 
 ### 📌 1. OBJETIVO DO PROJETO
@@ -8,31 +8,247 @@ Nome do Aluno: Arthur de Moraes Chaves; Júlia Dias | Orientador: Rodrigo Melo
 Este repositório contém o código-fonte (scripts em R) e os dados de apoio utilizados no estudo: Projeto de Pesquisa: Estudo Retrospectivo sobre os Diagnósticos Mais Frequentes no Departamento de Cirurgia Geral do Pronto Atendimento do Hospital Unimed-BH Contorno
 
 
-O objetivo principal da análise é contextualizar a Cirurgia Geral no ecossistema hospitalar, avaliando o impacto de variáveis clínicas (Porte Cirúrgico, Risco ASA) e operacionais (Dia da Semana, Tipo de Atendimento) sobre o tempo de ocupação da sala.
+# --- SCRIPT CONSOLIDADO FINAL: ANÁLISE DE EFICIÊNCIA EM CIRURGIA GERAL ---
+# Autor: [Seu Nome]
+# Data: 2025
 
-### ⚠️ 2. DADOS E ASPECTOS ÉTICOS (Confidencialidade)
+# ==============================================================================
+# --- 0. AVISO IMPORTANTE SOBRE A REPRODUTIBILIDADE ---
+# 
+# ATENÇÃO: A planilha de dados brutos ("Planilha bloco cirurgico.xlsx") 
+# NÃO está inclusa neste repositório por questões de sigilo hospitalar e proteção
+# de dados (LGPD), conforme detalhado no arquivo README.md e no artigo final.
+# 
+# O script abaixo foi desenhado para funcionar com a planilha original.
+# Caso deseje reproduzir a análise, é necessário solicitar acesso aos dados
+# ao Comitê de Ética da instituição e salvar o arquivo na mesma pasta deste script.
+# ==============================================================================
 
-**Atenção:** A planilha de dados primários não está incluída neste repositório por conter informações administrativas confidenciais da instituição (Hospital).
+# 1. CONFIGURAÇÃO E CARREGAMENTO DE PACOTES
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(readxl)) install.packages("readxl")
+if(!require(lubridate)) install.packages("lubridate")
+if(!require(scales)) install.packages("scales")
+if(!require(stringr)) install.packages("stringr")
 
-* **Fonte de Dados:** Sistema de Gestão do Centro Cirúrgico, UNIMED Contorno, Belo Horizonte/MG.
-* **Período Analisado:** 01 de janeiro de 2025 a 31 de março de 2025 (n = 1.216 procedimentos).
-* **Status de Sigilo:** O código foi desenvolvido utilizando uma versão dos dados previamente **anonimizada**. O acesso à base de dados original para fins de validação deve ser solicitado formalmente ao Comitê de Ética em Pesquisa da instituição.
-
-### 💻 3. REPRODUTIBILIDADE E DEPENDÊNCIAS
-
-O projeto foi desenvolvido no ambiente RStudio (linguagem R).
-
-#### 3.1 Arquivos Essenciais
-* `analise_final.R`: O script principal contendo a rotina completa de **Limpeza de Dados, Testes Estatísticos (Kruskal-Wallis, Qui-Quadrado)** e a geração das Figuras 1 a 11.
-* `Planilha bloco cirurgico.xlsx`: **(ESTE ARQUIVO DEVE SER INSERIDO PELO USUÁRIO PARA RODAR O CÓDIGO)**.
-
-#### 3.2 Pacotes Necessários
-Para rodar o script, é necessário ter instalados os seguintes pacotes (todos parte do R/Tidyverse):
-```r
-# Todos os pacotes são carregados no início do script:
 library(tidyverse)
 library(readxl)
 library(lubridate)
 library(scales)
 library(stringr)
 
+print("1. Bibliotecas carregadas com sucesso.")
+
+# 2. CARREGAMENTO E PRÉ-PROCESSAMENTO DOS DADOS
+# Nome do arquivo original (confidencial)
+file_path_original <- "Planilha bloco cirurgico.xlsx"
+
+print("2. Tentando carregar base de dados...")
+
+tryCatch({
+  # Leitura da base completa (todas as especialidades)
+  dados_brutos <- read_excel(file_path_original)
+  
+  # --- ETAPA ZERO: LIMPEZA E ENGENHARIA DE VARIÁVEIS ---
+  dados_processados <- dados_brutos %>%
+    mutate(
+      # A. Padronização de Nomes e Strings
+      ESPECIALIDADE = str_to_upper(str_trim(DS_ESPECIALID)),
+      TIPO_CIRURGIA = str_trim(TIPO_CIRURGIA),
+      
+      # B. Conversão da IDADE (Texto -> Numérico)
+      anos = as.numeric(str_match(IDADE, "(\\d+)\\s*Anos")[, 2]),
+      meses = as.numeric(str_match(IDADE, "(\\d+)\\s*Meses")[, 2]),
+      IDADE_NUMERICA = replace_na(anos, 0) + (replace_na(meses, 0) / 12),
+      
+      # C. Faixas Etárias Clínicas
+      FAIXA_ETARIA = case_when(
+        IDADE_NUMERICA < 18 ~ "Pediátrico (<18)",
+        IDADE_NUMERICA >= 18 & IDADE_NUMERICA <= 60 ~ "Adulto (18-60)",
+        IDADE_NUMERICA > 60 ~ "Idoso (>60)",
+        TRUE ~ "Não Informado"
+      ),
+      
+      # D. Conversão de Tempos (Texto -> Datetime)
+      DATA_BASE = as.Date(dmy_hms(DT_REALIZACAO)),
+      INICIO_SALA = DATA_BASE + hm(HORA_I_SALA),
+      FIM_SALA    = DATA_BASE + hm(HORA_F_SALA),
+      
+      # E. Correção de "Overnight" (Cirurgias que viram o dia)
+      FIM_SALA = if_else(FIM_SALA < INICIO_SALA, FIM_SALA + days(1), FIM_SALA, missing = FIM_SALA),
+      
+      # F. Cálculo do Indicador Principal (Minutos)
+      TEMPO_SALA_MINUTOS = as.numeric(difftime(FIM_SALA, INICIO_SALA, units = "mins")),
+      
+      # G. Variáveis para Heatmap (Turnos)
+      HORA_INICIO = hour(INICIO_SALA),
+      PERIODO = case_when(
+        HORA_INICIO >= 6 & HORA_INICIO < 12 ~ "Manhã",
+        HORA_INICIO >= 12 & HORA_INICIO < 18 ~ "Tarde",
+        TRUE ~ "Noite/Madrugada"
+      )
+    )
+  
+  # Criação do Dataset Específico para o Estudo (Apenas Cirurgia Geral)
+  dados_cg_limpos <- dados_processados %>%
+    filter(ESPECIALIDADE == "CIRURGIA GERAL")
+  
+  print(paste("SUCESSO! Base carregada. Total de cirurgias gerais:", nrow(dados_cg_limpos)))
+  
+}, error = function(e) {
+  stop(paste("\n[ERRO CRÍTICO]: O arquivo de dados não foi encontrado.\n",
+             "Certifique-se de que 'Planilha bloco cirurgico.xlsx' está na pasta.\n",
+             "Detalhe do erro:", e$message))
+})
+
+
+# 3. ANÁLISE ESTATÍSTICA (TESTES DE HIPÓTESE)
+
+print("3. Executando testes estatísticos...")
+
+# A. Teste de Normalidade (Shapiro-Wilk)
+shapiro_res <- shapiro.test(dados_cg_limpos$TEMPO_SALA_MINUTOS[1:min(5000, nrow(dados_cg_limpos))])
+p_shapiro <- format.pval(shapiro_res$p.value, digits = 3)
+
+# B. Comparação 1: Tempo x Porte (Kruskal-Wallis)
+kw_porte <- kruskal.test(TEMPO_SALA_MINUTOS ~ PORTE, data = dados_cg_limpos)
+p_kw_porte <- format.pval(kw_porte$p.value, digits = 3)
+
+# C. Comparação 2: Tempo x Urgência (Mann-Whitney)
+mw_urgencia <- wilcox.test(TEMPO_SALA_MINUTOS ~ TIPO_CIRURGIA, data = dados_cg_limpos)
+p_mw_urgencia <- format.pval(mw_urgencia$p.value, digits = 3)
+
+# D. Comparação 3: Tempo x Risco ASA (Kruskal-Wallis)
+# (Filtra NAs de ASA antes do teste)
+dados_asa <- dados_cg_limpos %>% filter(!is.na(CD_ASA))
+kw_asa <- kruskal.test(TEMPO_SALA_MINUTOS ~ CD_ASA, data = dados_asa)
+p_kw_asa <- format.pval(kw_asa$p.value, digits = 3)
+
+# E. Associação: Tipo x Porte (Qui-Quadrado)
+tabela_qui <- table(dados_cg_limpos$PORTE, dados_cg_limpos$TIPO_CIRURGIA)
+qui_res <- chisq.test(tabela_qui)
+p_qui <- format.pval(qui_res$p.value, digits = 3)
+
+
+# 4. GERAÇÃO E SALVAMENTO DOS GRÁFICOS (FIGURAS)
+
+print("4. Gerando e salvando as 11 figuras do artigo...")
+
+# --- GRUPO 1: DESCRITIVOS ---
+
+# Fig 1: Faixas Etárias
+g1 <- dados_cg_limpos %>%
+  filter(!is.na(FAIXA_ETARIA)) %>%
+  count(FAIXA_ETARIA) %>%
+  mutate(prop = n/sum(n)) %>%
+  ggplot(aes(x = FAIXA_ETARIA, y = n, fill = FAIXA_ETARIA)) +
+  geom_col() +
+  geom_text(aes(label = paste0(n, " (", percent(prop, 0.1), ")")), vjust = -0.5) +
+  labs(title = "Figura 1: Perfil Etário", x = "", y = "Pacientes") +
+  theme_minimal() + theme(legend.position = "none")
+ggsave("Figura1_Idade.png", plot = g1, width = 7, height = 5)
+
+# Fig 3: Heatmap
+dias_ordem <- c("Segunda-Feira", "Terça-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira", "Sábado", "Domingo")
+g3 <- dados_cg_limpos %>%
+  filter(!is.na(DIA_SEMANA)) %>%
+  mutate(DIA_SEMANA = factor(DIA_SEMANA, levels = dias_ordem),
+         PERIODO = factor(PERIODO, levels = c("Manhã", "Tarde", "Noite/Madrugada"))) %>%
+  count(DIA_SEMANA, PERIODO) %>%
+  ggplot(aes(x = PERIODO, y = fct_rev(DIA_SEMANA), fill = n)) +
+  geom_tile(color = "white") +
+  scale_fill_distiller(palette = "Spectral") +
+  labs(title = "Figura 3: Mapa de Calor (Fluxo)", x = "", y = "") + theme_minimal()
+ggsave("Figura3_Heatmap.png", plot = g3, width = 8, height = 5)
+
+# Fig 4: Top 10 (Pareto)
+g4 <- dados_cg_limpos %>%
+  count(DS_CIRURGIA, sort = TRUE) %>%
+  head(10) %>%
+  mutate(DS_CURTA = str_wrap(DS_CIRURGIA, 45)) %>%
+  ggplot(aes(x = reorder(DS_CURTA, n), y = n)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = n), hjust = -0.1) +
+  coord_flip() +
+  labs(title = "Figura 4: Top 10 Procedimentos", x = "", y = "Volume") +
+  theme_minimal()
+ggsave("Figura4_Top10.png", plot = g4, width = 10, height = 7)
+
+
+# --- GRUPO 2: ANÁLISE DE EFICIÊNCIA E TESTES ---
+
+# Fig 5: Normalidade (Q-Q Plot)
+g5 <- ggplot(dados_cg_limpos, aes(sample = TEMPO_SALA_MINUTOS)) +
+  stat_qq(alpha = 0.5) + stat_qq_line(color = "red") +
+  labs(title = "Figura 5: Q-Q Plot (Normalidade)", subtitle = paste("Shapiro-Wilk p =", p_shapiro)) + theme_minimal()
+ggsave("Figura5_Normalidade.png", plot = g5, width = 7, height = 5)
+
+# Fig 6: Comparação Porte (Kruskal-Wallis)
+g6 <- dados_cg_limpos %>%
+  filter(!is.na(PORTE) & !is.na(TEMPO_SALA_MINUTOS) & TEMPO_SALA_MINUTOS > 0) %>%
+  ggplot(aes(x = PORTE, y = TEMPO_SALA_MINUTOS, fill = PORTE)) +
+  geom_boxplot(outlier.colour = "red", outlier.alpha = 0.5) +
+  labs(title = "Figura 6: Tempo x Porte", subtitle = paste("Kruskal-Wallis p", ifelse(kw_porte$p.value < 0.001, "< 0.001", paste("=", p_kw_porte)))) +
+  coord_cartesian(ylim = c(0, 400)) + theme_minimal() + theme(legend.position = "none")
+ggsave("Figura6_Porte.png", plot = g6, width = 8, height = 6)
+
+# Fig 7: Comparação Urgência (Mann-Whitney)
+g7 <- dados_cg_limpos %>%
+  filter(!is.na(TIPO_CIRURGIA) & !is.na(TEMPO_SALA_MINUTOS) & TEMPO_SALA_MINUTOS > 0) %>%
+  ggplot(aes(x = TIPO_CIRURGIA, y = TEMPO_SALA_MINUTOS, fill = TIPO_CIRURGIA)) +
+  geom_boxplot(outlier.colour = "red", outlier.alpha = 0.5) +
+  labs(title = "Figura 7: Tempo x Tipo", subtitle = paste("Mann-Whitney p", ifelse(mw_urgencia$p.value < 0.001, "< 0.001", paste("=", p_mw_urgencia)))) +
+  coord_cartesian(ylim = c(0, 300)) + theme_minimal() + theme(legend.position = "none")
+ggsave("Figura7_Urgencia.png", plot = g7, width = 8, height = 6)
+
+# Fig 2 (Extra): Risco ASA
+g2 <- dados_asa %>%
+  ggplot(aes(x = CD_ASA, y = TEMPO_SALA_MINUTOS, fill = CD_ASA)) +
+  geom_boxplot(outlier.colour = "red", outlier.alpha = 0.5) +
+  labs(title = "Figura 2: Tempo x Risco ASA", subtitle = paste("Kruskal-Wallis p", ifelse(kw_asa$p.value < 0.001, "< 0.001", paste("=", p_kw_asa)))) +
+  coord_cartesian(ylim = c(0, 400)) + theme_minimal() + theme(legend.position = "none")
+ggsave("Figura2_ASA.png", plot = g2, width = 8, height = 6)
+
+# Fig 8: Associação (Qui-Quadrado)
+g8 <- dados_cg_limpos %>%
+  filter(!is.na(PORTE) & !is.na(TIPO_CIRURGIA)) %>%
+  ggplot(aes(x = TIPO_CIRURGIA, fill = PORTE)) +
+  geom_bar(position = "fill") +
+  labs(title = "Figura 8: Associação Tipo vs Porte", subtitle = paste("Qui-Quadrado p", ifelse(qui_res$p.value < 0.001, "< 0.001", paste("=", p_qui)))) +
+  theme_minimal()
+ggsave("Figura8_Associacao.png", plot = g8, width = 8, height = 6)
+
+
+# --- GRUPO 3: COMPARATIVO ESTRATÉGICO ---
+
+# Identificar Top 5 Especialidades
+top_5_esp <- dados_processados %>% count(ESPECIALIDADE, sort=TRUE) %>% head(5) %>% pull(ESPECIALIDADE)
+dados_top5 <- dados_processados %>% filter(ESPECIALIDADE %in% top_5_esp)
+
+# Fig 9: Volume
+g9 <- dados_processados %>% count(ESPECIALIDADE) %>% filter(ESPECIALIDADE %in% top_5_esp) %>%
+  ggplot(aes(x = reorder(ESPECIALIDADE, n), y = n, fill = ESPECIALIDADE == "CIRURGIA GERAL")) +
+  geom_col() + coord_flip() +
+  labs(title = "Figura 9: Ranking de Volume", x = "", y = "Cirurgias") +
+  scale_fill_manual(values = c("gray70", "steelblue")) + theme_minimal() + theme(legend.position = "none")
+ggsave("Figura9_Volume.png", plot = g9, width = 8, height = 5)
+
+# Fig 10: Eficiência Comparada
+g10 <- dados_top5 %>% filter(TEMPO_SALA_MINUTOS > 0) %>%
+  ggplot(aes(x = reorder(ESPECIALIDADE, TEMPO_SALA_MINUTOS, median), y = TEMPO_SALA_MINUTOS, fill = ESPECIALIDADE == "CIRURGIA GERAL")) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_manual(values = c("gray70", "steelblue")) +
+  coord_cartesian(ylim = c(0, 300)) +
+  labs(title = "Figura 10: Eficiência Comparada", x = "", y = "Tempo Sala (min)") +
+  theme_minimal() + theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave("Figura10_Eficiencia.png", plot = g10, width = 8, height = 6)
+
+# Fig 11: Perfil Comparado
+g11 <- dados_top5 %>% filter(!is.na(TIPO_CIRURGIA)) %>%
+  ggplot(aes(x = ESPECIALIDADE, fill = TIPO_CIRURGIA)) +
+  geom_bar(position = "fill") +
+  labs(title = "Figura 11: Perfil de Atendimento", x = "", y = "Proporção") +
+  theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave("Figura11_Perfil.png", plot = g11, width = 8, height = 6)
+
+print("--- SUCESSO TOTAL! Todos os arquivos e estatísticas foram gerados. ---")
