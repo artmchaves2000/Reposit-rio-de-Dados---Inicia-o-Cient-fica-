@@ -1,0 +1,36 @@
+# 🔬 ANÁLISE DE EFICIÊNCIA OPERACIONAL NA CIRURGIA GERAL
+## [Seu Nome: (Nome do Aluno)] | [Seu Orientador: (Nome do Professor)]
+
+---
+
+### 📌 1. OBJETIVO DO PROJETO
+
+Este repositório contém o código-fonte (scripts em R) e os dados de apoio utilizados no estudo **"[Inserir Título Completo do Seu Artigo Aqui]"**. 
+
+O objetivo principal da análise é contextualizar a Cirurgia Geral no ecossistema hospitalar, avaliando o impacto de variáveis clínicas (Porte Cirúrgico, Risco ASA) e operacionais (Dia da Semana, Tipo de Atendimento) sobre o tempo de ocupação da sala.
+
+### ⚠️ 2. DADOS E ASPECTOS ÉTICOS (Confidencialidade)
+
+**Atenção:** A planilha de dados primários não está incluída neste repositório por conter informações administrativas confidenciais da instituição (Hospital).
+
+* **Fonte de Dados:** Sistema de Gestão do Centro Cirúrgico, [Nome do Hospital], Belo Horizonte/MG.
+* **Período Analisado:** 01 de janeiro de 2025 a 31 de março de 2025 (n = 1.216 procedimentos).
+* **Status de Sigilo:** O código foi desenvolvido utilizando uma versão dos dados previamente **anonimizada**. O acesso à base de dados original para fins de validação deve ser solicitado formalmente ao Comitê de Ética em Pesquisa da instituição.
+
+### 💻 3. REPRODUTIBILIDADE E DEPENDÊNCIAS
+
+O projeto foi desenvolvido no ambiente RStudio (linguagem R).
+
+#### 3.1 Arquivos Essenciais
+* `analise_final.R`: O script principal contendo a rotina completa de **Limpeza de Dados, Testes Estatísticos (Kruskal-Wallis, Qui-Quadrado)** e a geração das Figuras 1 a 11.
+* `Planilha bloco cirurgico.xlsx`: **(ESTE ARQUIVO DEVE SER INSERIDO PELO USUÁRIO PARA RODAR O CÓDIGO)**.
+
+#### 3.2 Pacotes Necessários
+Para rodar o script, é necessário ter instalados os seguintes pacotes (todos parte do R/Tidyverse):
+```r
+# Todos os pacotes são carregados no início do script:
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(scales)
+library(stringr)
